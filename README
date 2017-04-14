@@ -1,0 +1,154 @@
+CSE506 FALL 2016 HW2
+Author: Sayan Bandyopadhyay
+SBUID: 110946522
+
+This project aims at recording some basic syscalls which processes would invoke. All the information and parameters are recorded in a record file. This record file can be later used to replay all the syscalls made in the same order with the same output.
+
+The project contains a minimal linux kernel configuration namely "kernel.config" that should be used to replace the existing ".config" file in the kernel source code folder.
+
+
+Implementation description (hw2/ and fs/trfs/) -
+
+* hw2/trfsrecord.h
+
+This header file contains the struct required for defining the structure of arguments which are to be used for writing the trace record. This is the struct that will be written in the trace record file and later used for replaying.
+
+* hw2/trctl.c
+
+This file contains the userspace code for communicating with TRFS file system using IOCTL. This program is responsible for properly evaluating the command line invocation of the parameters and accordingly executing the IOCTL call or throwing error. This program controls which trfs f/s methods are intercepted and
+traced.
+
+* hw2/trctl.h
+
+This header file contains the unique number for IOCTL with trfs, as well different IOCTL operations definitions. Please refer to the file for further description.
+
+* hw2/treplay.c
+
+This file contains the userspace code for replaying the relevant system calls as per each record stated in trace file. This program can display the records with or without replaying them. While replaying, it can also abort if in strict mode and deviation occurs.
+
+* hw2/treplay.h
+
+This header file contains the path of the folder being used for replaying (either absolute path or relative path w.r.t to hw2).
+
+* fs/trfs/trfs.h
+
+Added few struct definitions and some more header files for supporting various operations throughout the trfs f/s. Refer to this file for referencing various such structures / functions.
+
+* fs/trfs/traceops.c
+
+This program contains the implementation for various helper functions which are used throughout the trfs f/s for record building, writing as well as other such generic/frequenty used functionalities.
+
+* fs/trfs/traceops.h
+
+This header file contains the definitions of functions in traceops.c as well as some other variables.
+
+* fs/trfs/main.c
+
+Modified to initiate certain parameters in super_block of f/s while mounting. Also performs checks for tfile parameter being present and whether or not the mount point is valid.
+
+* fs/trfs/file.c
+
+File structure related operations to be traced are placed in this file.
+
+* fs/trfs/inode.c
+
+Inode structure related operations to be traced are placed in this file.
+
+* fs/trfs/install_module.sh
+
+Shell script containing various consolidated operations/commands to successfully build the f/s for performing operations on it.
+
+
+
+How to initiate/build -
+1) create a directory trfs in /mnt where the trfs filesystem will be mounted
+2) make sure your current directory is "hw2-sabandyopadh" before step 3
+3) sh fs/trfs/install_module.sh /tfile/path /path/to/be/mounted
+
+Details of step 3)
+umount /mnt/trfs - unmount existing trfs f/s if any
+rm $1 - remove existing record file if any
+make - make the kernel config / changes in any modules
+lsmod - list current modules
+rmmod /usr/src/hw2-sabandyopadh/fs/trfs - remove old trfs module
+insmod /usr/src/hw2-sabandyopadh/fs/trfs/trfs.ko - install new trfs module
+lsmod - list current modules
+rm -r hw2/replay - remove old replay directory if any
+cp -r $2 hw2/replay - copy the content of directory being mounted (current state) in hw2/replay folder for replaying upon later
+mount -t trfs -o tfile=$1 $2 /mnt/trfs - mount the $2 path on the mount point /mnt/trfs and create a record trace file $1
+
+4) initiate tracking using trctl in hw2/ directory
+5) perform operations to be traced in /mnt/trfs directory and its sub-directories
+6) once done, replay the records using treplay in hw2/ directory
+
+NOTE : Limitations to be kept in mind before testing,
+- trace and replay support is currently only for 5 syscalls namely,
+        syscall in trfs-                hex value for each-
+        BITMAP_TRFS_OPEN                0x00000001
+        BITMAP_TRFS_READ                0x00000002
+        BITMAP_TRFS_WRITE               0x00000004
+        BITMAP_TRFS_MKDIR               0x00000080
+        BITMAP_TRFS_RMDIR               0x00000100
+        (refer to hw2/trfsrecord.h for grading purposes to avoid discrepancies)
+- /path/to/be/mounted can't be hw2/replay", "hw2" or any of the directories that occur in their lookup
+
+
+Record structure (in trfsrecord.h along with definition for syscalls above) -
+struct trfs_tfile_record {
+        /* record id */
+        unsigned int            r_id;
+        /* record size */
+        short unsigned int      r_size;
+        /* record type out of the above stated 9 syscalls */
+        unsigned long int       r_type;
+        /* record flags, if any for the concerned file */
+        unsigned int            r_open_flags;
+        /* record modes, if any for the concerned file/dentry */
+        unsigned int            r_permission_mode;
+        /* record return value for the syscall being traced */
+        unsigned int            r_rc;
+        /* record length of the r_pathname */
+        unsigned int            r_len_pathname;
+        /*record pathname, offsets, size etc and any other such information in a char stream separated by '\0' characters for retrieval during replaying */
+        char                            r_pathname[1];
+};
+
+NOTE : This particular structure was chosen for one reason, i.e. to ensure easy storage and retrieval and also maintain locality of the entire record. Not only this provides efficient means of using entire record in a single go but also it provides for a customizable storage 'container' whose size can vary according to the content it can store.
+
+How to use userspace programs (trctl and treplay) -
+
+$ ./trctl CMD /mounted/path
+
+where CMD can be:
+all             : to enable tracing for all f/s methods
+none    : to disable tracing for all f/s methods
+0xNN    : hex number to pass bitmap of methods to trace or not
+
+/mounted/path is the path of your mounted f/s (e.g., /mnt/trfs in this case).  Also,
+
+$ ./trctl /mounted/path         (i.e. no option given)
+
+retrieves the current value of the bitmap and display it in hex.
+
+
+$ ./treplay [-ns] TFILE
+
+TFILE: the trace file to replay
+-n: show what records will be replayed but don't replay them
+-s: strict mode -- abort replaying as soon as a deviation occurs
+
+By default, treplay displays the details of records to be replayed, the system call to be replayed, then replay the syscall.  Finally, display the result of the syscall executing now compared to what the return value was originally (e.g., a record of open(2) may say that the traced op succeeded, but when you replay it, it may fail, so show those differences).
+If the -n option is given, you just show the info without replaying it.
+By default, if replaying a syscall produces a different result than before, then program keeps going and replays the next record.  But if the -s flag is given, then it aborts replaying as soon as a failure occurs, where failure is defined as a deviation between the result of the traced record and its replaying right now.  Note that if traced record says, for example, mkdir(2) originally failed with -ENOENT, then a "success" here means that you replay that mkdir call and ALSO get an ENOENT!  A "failure" here would be a deviation -- meaning that you replayed mkdir and got anything other than ENOENT (including when mkdir returned 0, i.e., succeeded).
+
+Note - The code has been written to agree completely with the guidelines stated in the file "CodingStyle" in "Documentation" directory.
+
+REFERENCES -
+1) http://lxr.free-electrons.com/ - for code reference and navigation online
+2) http://www-numi.fnal.gov/offline_software/srt_public_context/WebDocs/Errors/unix_system_errors.html - for error code reference
+3) http://man7.org/linux/man-pages/man3/opterr.3.html - understanding getopt
+4) http://man7.org/linux/man-pages/ - for overview to various flags and existing calls
+5) http://git.fsl.cs.sunysb.edu/ - for wrapfs code lookup online
+
+
+
